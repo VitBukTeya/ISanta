@@ -9,19 +9,20 @@ import org.vitbuk.draw.SattoloDrawAlgorithm
 import org.vitbuk.model.Event
 import org.vitbuk.model.EventState
 import org.vitbuk.model.Participant
+import org.vitbuk.service.StartEventAttempt
+import org.vitbuk.service.StartEventService
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
-private const val DEFAULT_EVENT_NAME = "Тайный Сайта 🎁"
+private const val DEFAULT_EVENT_NAME = "Тайный Санта 🎁"
 
 fun main() {
+    val algorithm = SattoloDrawAlgorithm(reseedEachDraw = true)
+    val startEventService = StartEventService(algorithm)
+    val dmReadyUserIds = ConcurrentHashMap.newKeySet<Long>()
     val token = System.getenv("BOT_TOKEN")
         ?: error("Env BOT_TOKEN is not set. Put it in .env (BOT_TOKEN=...) or export BOT_TOKEN=...")
-
-    val algorithm = SattoloDrawAlgorithm()
-
     val eventsByChatId = ConcurrentHashMap<Long, Event>()
-
     val locksByChatId = ConcurrentHashMap<Long, Any>()
     fun lockFor(chatId: Long): Any = locksByChatId.computeIfAbsent(chatId) { Any() }
 
@@ -36,11 +37,11 @@ fun main() {
                     text = """
                         Команды (в группе):
                         /create [название] — создать ивент (хост)
-                        /cancel - хост отменяет ивент
+                        /cancel — отменить ивент (только хост)
                         /join — зарегистрироваться
                         /leave — выйти
-                        /list — список участни:ц
-                        /start_event — провести жеребьёвку (хост)
+                        /list — список участни:ц и готовность ЛС
+                        /start_event — провести жеребьёвку (только хост)
 
                         Важно: чтобы получить результат в ЛС — открой личку с ботом и нажми /start.
                     """.trimIndent()
@@ -48,11 +49,23 @@ fun main() {
             }
 
             command("start") {
-                bot.sendMessage(
-                    chatId = fromId(message.chat.id),
-                    text = "Привет! Если ты участни:ца Secret Santa — теперь я смогу писать тебе в ЛС ✅\n" +
-                            "Вернись в группу и жди жеребьёвку."
-                )
+                val chat = message.chat
+                val from = message.from
+
+                if (isPrivateChat(chat.type) && from != null) {
+                    dmReadyUserIds += from.id
+
+                    bot.sendMessage(
+                        chatId = fromId(chat.id),
+                        text = "✅ Отлично! Теперь я могу писать тебе в ЛС.\n" +
+                                "Вернись в группу и жди жеребьёвку 🎁"
+                    )
+                } else {
+                    bot.sendMessage(
+                        chatId = fromId(chat.id),
+                        text = "Чтобы я смог отправить тебе результат жеребьёвки — открой личку с ботом и нажми /start."
+                    )
+                }
             }
 
             command("create") {
@@ -70,14 +83,11 @@ fun main() {
                 val eventName = args.joinToString(" ").trim().ifBlank { DEFAULT_EVENT_NAME }
 
                 val lock = lockFor(chat.id)
-                synchronized(lock) {
+                val replyText = synchronized(lock) {
                     val existing = eventsByChatId[chat.id]
                     if (existing != null && existing.state != EventState.FINISHED) {
-                        bot.sendMessage(
-                            fromId(chat.id),
-                            "Ивент уже существует: «${existing.name}» (статус: ${existing.state})."
-                        )
-                        return@command
+                        return@synchronized "Ивент уже существует: «${existing.name}» (статус: ${existing.state}).\n" +
+                                "Если нужно начать заново — хост может сделать /cancel."
                     }
 
                     val host = from.toParticipant()
@@ -94,11 +104,15 @@ fun main() {
 
                     eventsByChatId[chat.id] = event
 
-                    bot.sendMessage(
-                        fromId(chat.id),
-                        "Создан ивент «${event.name}».\nХост: ${host.display()}\n\nПишите /join чтобы зарегистрироваться."
-                    )
+                    buildString {
+                        append("Создан ивент «${event.name}».\n")
+                        append("Хост: ${host.display()}\n\n")
+                        append("Пишите /join чтобы зарегистрироваться.\n")
+                        append("Важно: каждый участни:ца должен:на нажать /start в личке с ботом, иначе жеребьёвка не стартанёт.")
+                    }
                 }
+
+                bot.sendMessage(fromId(chat.id), replyText)
             }
 
             command("join") {
@@ -111,72 +125,77 @@ fun main() {
                 val from = message.from ?: return@command
                 val lock = lockFor(chat.id)
 
-                synchronized(lock) {
+                val replyText = synchronized(lock) {
                     val event = eventsByChatId[chat.id]
-                    if (event == null) {
-                        bot.sendMessage(fromId(chat.id), "Сначала создай ивент командой /create.")
-                        return@command
-                    }
+                        ?: return@synchronized "Сначала создай ивент командой /create."
+
                     if (event.state != EventState.REGISTRATION) {
-                        bot.sendMessage(fromId(chat.id), "Регистрация закрыта (статус: ${event.state}).")
-                        return@command
+                        return@synchronized "Регистрация закрыта (статус: ${event.state})."
                     }
+
                     if (event.participants.containsKey(from.id)) {
-                        bot.sendMessage(fromId(chat.id), "Ты уже зарегистрирован:а 🙂")
-                        return@command
+                        return@synchronized "Ты уже зарегистрирован:а 🙂"
                     }
 
                     val p = from.toParticipant()
                     event.participants[from.id] = p
 
-                    bot.sendMessage(
-                        fromId(chat.id),
-                        "✅ ${p.display()} зарегистрирован:а. Сейчас участни:ц : ${event.participants.size}"
-                    )
+                    val readyMark = if (from.id in dmReadyUserIds) "✅" else "❌"
+
+                    buildString {
+                        append("✅ ${p.display()} зарегистрирован:а. Сейчас участни:ц: ${event.participants.size}\n")
+                        if (readyMark == "❌") {
+                            append("⚠️ Чтобы получить результат в ЛС — открой личку с ботом и нажми /start.")
+                        }
+                    }
                 }
+
+                bot.sendMessage(fromId(chat.id), replyText)
             }
 
             command("leave") {
                 val chat = message.chat
                 if (!isGroupChat(chat.type)) return@command
+
                 val from = message.from ?: return@command
                 val lock = lockFor(chat.id)
 
-                synchronized(lock) {
+                val replyText = synchronized(lock) {
                     val event = eventsByChatId[chat.id]
-                    if (event == null) {
-                        bot.sendMessage(fromId(chat.id), "Ивент не найден. /create")
-                        return@command
-                    }
+                        ?: return@synchronized "Ивент не найден. /create"
+
                     if (event.state != EventState.REGISTRATION) {
-                        bot.sendMessage(fromId(chat.id), "Нельзя выйти — регистрация закрыта (статус: ${event.state}).")
-                        return@command
+                        return@synchronized "Нельзя выйти — регистрация закрыта (статус: ${event.state})."
                     }
 
                     val removed = event.participants.remove(from.id)
-                    if (removed == null) {
-                        bot.sendMessage(fromId(chat.id), "Тебя нет в списке участни:ц.")
-                        return@command
-                    }
+                        ?: return@synchronized "Тебя нет в списке участни:ц."
 
-                    bot.sendMessage(
-                        fromId(chat.id),
-                        "➖ ${removed.display()} вышл:а. Сейчас участни:ц: ${event.participants.size}"
-                    )
+                    "➖ ${removed.display()} вышл:а. Сейчас участни:ц: ${event.participants.size}"
                 }
+
+                bot.sendMessage(fromId(chat.id), replyText)
             }
 
             command("list") {
                 val chat = message.chat
                 if (!isGroupChat(chat.type)) return@command
+
                 val lock = lockFor(chat.id)
 
                 val text = synchronized(lock) {
                     val event = eventsByChatId[chat.id]
                         ?: return@synchronized "Ивент не найден. Создай /create"
 
-                    val people = event.participants.values.joinToString("\n") { "• ${it.display()}" }
-                    "Ивент: «${event.name}» (статус: ${event.state})\nУчастни:цы (${event.participants.size}):\n$people"
+                    val people = event.participants.values.joinToString("\n") { p ->
+                        val ready = if (p.userId in dmReadyUserIds) "✅" else "❌"
+                        "• $ready ${p.display()}"
+                    }
+
+                    "Ивент: «${event.name}» (статус: ${event.state})\n" +
+                            "Участни:цы (${event.participants.size}):\n$people\n\n" +
+                            "✅ = готовы получать подарки!\n" +
+                            "❌ = ещё не нажал:а /start в личке"
                 }
 
                 bot.sendMessage(fromId(chat.id), text)
@@ -208,6 +227,7 @@ fun main() {
 
                 bot.sendMessage(fromId(chat.id), replyText)
             }
+
             command("start_event") {
                 val chat = message.chat
                 if (!isGroupChat(chat.type)) {
@@ -218,78 +238,80 @@ fun main() {
                 val from = message.from ?: return@command
                 val lock = lockFor(chat.id)
 
-                data class Snapshot(
-                    val eventName: String,
-                    val participants: Map<Long, Participant>,
-                    val assignments: Map<Long, Long>,
-                    val warnings: List<String>
-                )
-
-                val snapshot: Snapshot = synchronized(lock) {
+                val attempt: StartEventAttempt = synchronized(lock) {
                     val event = eventsByChatId[chat.id]
-                    if (event == null) {
-                        bot.sendMessage(fromId(chat.id), "Ивент не найден. /create")
-                        return@command
-                    }
+                        ?: return@synchronized StartEventAttempt.NotReady(
+                            missing = emptyList(),
+                            message = "Ивент не найден. /create"
+                        )
+
                     if (event.hostUserId != from.id) {
-                        bot.sendMessage(fromId(chat.id), "Только хост может запускать жеребьёвку.")
-                        return@command
+                        return@synchronized StartEventAttempt.NotReady(
+                            missing = emptyList(),
+                            message = "Только хост может запускать жеребьёвку."
+                        )
                     }
+
                     if (event.state != EventState.REGISTRATION) {
-                        bot.sendMessage(fromId(chat.id), "Жеребьёвка уже запускалась/регистрация закрыта (статус: ${event.state}).")
+                        return@synchronized StartEventAttempt.NotReady(
+                            missing = emptyList(),
+                            message = "Жеребьёвка уже запускалась/регистрация закрыта (статус: ${event.state})."
+                        )
+                    }
+
+                    if (event.participants.size < 2) {
+                        return@synchronized StartEventAttempt.NotReady(
+                            missing = emptyList(),
+                            message = "Нужно минимум 2 участни:цы."
+                        )
+                    }
+
+                    startEventService.start(event, dmReadyUserIds)
+                }
+
+                when (attempt) {
+                    is StartEventAttempt.NotReady -> {
+                        bot.sendMessage(fromId(chat.id), attempt.message)
                         return@command
                     }
 
-                    val participants = event.participants.values.toList()
-                    if (participants.size < 2) {
-                        bot.sendMessage(fromId(chat.id), "Нужно минимум 2 участни:цы.")
-                        return@command
-                    }
+                    is StartEventAttempt.Started -> {
+                        val snapshot = attempt.snapshot
 
-                    val result = algorithm.draw(participants)
-                    event.drawResult = result
-                    event.state = EventState.STARTED
+                        val failed = mutableListOf<Participant>()
 
-                    Snapshot(
-                        eventName = event.name,
-                        participants = LinkedHashMap(event.participants),
-                        assignments = result.assignments.toMap(),
-                        warnings = result.warnings
-                    )
-                }
+                        for ((giverId, receiverId) in snapshot.assignments) {
+                            val giver = snapshot.participants[giverId] ?: continue
+                            val receiver = snapshot.participants[receiverId] ?: continue
 
-                val failed = mutableListOf<Participant>()
+                            val dmChatId = fromId(giverId)
+                            val dmText = "🎁 Жеребьёвка для «${snapshot.eventName}»\n" +
+                                    "Ты даришь: ${receiver.display()}"
 
-                for ((giverId, receiverId) in snapshot.assignments) {
-                    val giver = snapshot.participants[giverId] ?: continue
-                    val receiver = snapshot.participants[receiverId] ?: continue
+                            val sendRes = bot.sendMessage(dmChatId, dmText)
+                            sendRes.fold(
+                                { /* ok */ },
+                                { failed += giver }
+                            )
+                        }
 
-                    val dmChatId = fromId(giverId)
-                    val dmText = "🎁 Жеребьёвка для «${snapshot.eventName}»\n" +
-                            "Ты даришь: ${receiver.display()}"
+                        val groupMsg = buildString {
+                            append("✅ Жеребьёвка проведена! Результаты отправлены в ЛС.\n")
 
-                    val sendRes = bot.sendMessage(dmChatId, dmText)
-                    sendRes.fold(
-                        { /* ok */ },
-                        { failed += giver }
-                    )
-                }
+                            if (snapshot.warnings.isNotEmpty()) {
+                                append("\n⚠️ Замечания:\n")
+                                snapshot.warnings.forEach { append("• ").append(it).append('\n') }
+                            }
 
-                val groupMsg = buildString {
-                    append("✅ Жеребьёвка проведена! Результаты отправлены в ЛС.\n")
+                            if (failed.isNotEmpty()) {
+                                append("\n⚠️ Не смог написать в ЛС этим людям (возможно, они заблокировали бота):\n")
+                                failed.forEach { append("• ").append(it.display()).append('\n') }
+                            }
+                        }
 
-                    if (snapshot.warnings.isNotEmpty()) {
-                        append("\n⚠️ Замечания:\n")
-                        snapshot.warnings.forEach { append("• ").append(it).append('\n') }
-                    }
-
-                    if (failed.isNotEmpty()) {
-                        append("\n⚠️ Не смог написать в ЛС этим людям (скорее всего, они не нажали /start в личке с ботом):\n")
-                        append(failed.joinToString("\n") { "• ${it.display()}" })
+                        bot.sendMessage(fromId(chat.id), groupMsg)
                     }
                 }
-
-                bot.sendMessage(fromId(chat.id), groupMsg)
             }
         }
     }
@@ -299,6 +321,9 @@ fun main() {
 
 private fun isGroupChat(type: String?): Boolean =
     type == "group" || type == "supergroup"
+
+private fun isPrivateChat(type: String?): Boolean =
+    type == "private"
 
 private fun User.toParticipant(): Participant =
     Participant(
