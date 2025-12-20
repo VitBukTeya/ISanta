@@ -72,6 +72,3 @@ replay_pid*
 
 .env
 *.env
-
-Dockerfile
-.dockerignore
