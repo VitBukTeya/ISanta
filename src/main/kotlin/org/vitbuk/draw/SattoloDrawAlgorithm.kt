@@ -20,7 +20,7 @@ class SattoloDrawAlgorithm(
             val assignments = mapOf(ids[0] to ids[1], ids[1] to ids[0])
             return DrawResult(
                 assignments = assignments,
-                warnings = listOf("В ивенте 2 участника — обмен неизбежно взаимный.")
+                warnings = listOf("В ивенте 2 участни:цы — обмен неизбежно взаимный.")
             )
         }
 
