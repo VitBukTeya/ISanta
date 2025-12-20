@@ -3,13 +3,22 @@ package org.vitbuk.draw
 import org.vitbuk.model.DrawResult
 import org.vitbuk.model.Participant
 import java.security.SecureRandom
+import java.time.Instant
 
 class SattoloDrawAlgorithm(
     private val allowTwoParticipants: Boolean = true,
-    private val random: SecureRandom = SecureRandom()
+    private val random: SecureRandom = SecureRandom(),
+    private val reseedEachDraw: Boolean = false,
+    private val seedSupplier: () -> Long = {
+        Instant.now().toEpochMilli() xor System.nanoTime()
+    }
 ) : SecretSantaDrawAlgorithm {
 
     override fun draw(participants: List<Participant>): DrawResult {
+        if (reseedEachDraw) {
+            random.setSeed(seedSupplier())
+        }
+
         val ids = participants.map { it.userId }
         require(ids.size >= 2) { "Нужно хотя бы 2 участни:цы" }
 
@@ -34,7 +43,6 @@ class SattoloDrawAlgorithm(
         }
 
         sanityCheck(ids, assignments)
-
         return DrawResult(assignments = assignments)
     }
 
