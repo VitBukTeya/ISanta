@@ -17,12 +17,14 @@ ISanta - Secrete Santa Telegram Bot for Free
 Bot will randomly (satollo's algorithm) assign participants to givers and recievers (no self-givers)
 
 TODO: 
-EventServce instead of huge Main.kt
+1.EventService instead of huge Main.kt
 
-CommandFactory
+2.CommandFactory
 
-Some text editing
+3.Some text editing
 
-Persistance with some kind of DB
+4.Persistance with some kind of DB
 
-/wish command to set up wishlist for every Participant
+5./wish command to set up wishlist for every Participant
+
+6.smart toilet integration
