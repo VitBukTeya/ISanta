@@ -18,6 +18,11 @@ Bot will randomly (satollo's algorithm) assign participants to givers and reciev
 
 TODO: 
 EventServce instead of huge Main.kt
+
 CommandFactory
+
 Some text editing
+
 Persistance with some kind of DB
+
+/wish command to set up wishlist for every Participant
