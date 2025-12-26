@@ -16,6 +16,8 @@ ISanta - Secrete Santa Telegram Bot for Free
 
 /wish - updated wishes of participant (they will be shown to giver)
 
+/repo - shows repo of the project
+
 Bot will randomly (satollo's algorithm) assign participants to givers and recievers (no self-givers)
 
 TODO:
