@@ -24,9 +24,7 @@ tasks.test {
     useJUnitPlatform()
 }
 
-application {
-    mainClass.set("org.vitbuk.MainKt")
-}
+application { mainClass.set("org.vitbuk.MainKt") }
 
 tasks.named<JavaExec>("run") {
     val envFile = rootProject.file(".env")
