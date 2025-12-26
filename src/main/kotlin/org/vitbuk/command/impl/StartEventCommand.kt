@@ -20,13 +20,10 @@ class StartEventCommand(
         }
 
         val from = ctx.from ?: return
-
         val attempt = eventService.startEvent(ctx.chatId, from.id)
 
         when (attempt) {
-            is StartEventAttempt.NotReady -> {
-                ctx.reply(attempt.message)
-            }
+            is StartEventAttempt.NotReady -> ctx.reply(attempt.message)
 
             is StartEventAttempt.Started -> {
                 val snapshot = attempt.snapshot
@@ -36,25 +33,19 @@ class StartEventCommand(
                     val giver = snapshot.participants[giverId] ?: continue
                     val receiver = snapshot.participants[receiverId] ?: continue
 
-                    val wish = eventService.getWish(receiverId)
+                    val wishText = receiver.wish.trim().takeIf { it.isNotBlank() }
 
                     val dmText = buildString {
                         append("🎁 Жеребьёвка для «${snapshot.eventName}»\n")
                         append("Ты даришь: ${receiver.display()}")
-
-                        if (!wish.isNullOrBlank()) {
-                            append("\n\n📝 Пожелания получателя:")
-                            append("\n")
-                            append(wish)
+                        if (wishText != null) {
+                            append("\n\n🎯 Пожелания получателя:\n")
+                            append(wishText)
                         }
                     }
 
                     val sendRes = ctx.bot.sendMessage(ChatId.fromId(giverId), dmText)
-
-                    sendRes.fold(
-                        { /* ok */ },
-                        { failed += giver }
-                    )
+                    sendRes.fold({ /* ok */ }, { failed += giver })
                 }
 
                 val groupMsg = buildString {
