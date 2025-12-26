@@ -17,3 +17,5 @@ WORKDIR /app
 COPY --from=build /app/build/install/ISanta /app
 
 CMD ["/app/bin/ISanta"]
+
+VOLUME ["/app/state"]
