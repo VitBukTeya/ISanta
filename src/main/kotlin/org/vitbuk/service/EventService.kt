@@ -3,21 +3,49 @@ package org.vitbuk.service
 import org.vitbuk.model.Event
 import org.vitbuk.model.EventState
 import org.vitbuk.model.Participant
+import org.vitbuk.persistence.BotState
+import org.vitbuk.persistence.StateStore
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 class EventService(
     private val startEventService: StartEventService,
+    private val stateStore: StateStore? = null,
     private val defaultEventName: String = "Тайный Санта 🎁"
 ) {
     private val dmReadyUserIds = ConcurrentHashMap.newKeySet<Long>()
-    private val wishesByUserId = ConcurrentHashMap<Long, String>()
     private val eventsByChatId = ConcurrentHashMap<Long, Event>()
     private val locksByChatId = ConcurrentHashMap<Long, Any>()
     private fun lockFor(chatId: Long): Any = locksByChatId.computeIfAbsent(chatId) { Any() }
 
+    init {
+        stateStore?.loadOrNull()?.let { state ->
+            dmReadyUserIds += state.dmReadyUserIds
+            eventsByChatId.putAll(state.eventsByChatId)
+        }
+    }
+
+    private fun persist() {
+        val store = stateStore ?: return
+
+        val eventsSnapshot = LinkedHashMap<Long, Event>()
+        for ((chatId, _) in eventsByChatId) {
+            val evCopy = synchronized(lockFor(chatId)) { eventsByChatId[chatId]?.deepCopy() }
+            if (evCopy != null) eventsSnapshot[chatId] = evCopy
+        }
+
+        store.save(
+            BotState(
+                version = 1,
+                dmReadyUserIds = dmReadyUserIds.toSet(),
+                eventsByChatId = eventsSnapshot
+            )
+        )
+    }
+
     fun markDmReady(userId: Long) {
         dmReadyUserIds += userId
+        persist()
     }
 
     fun isDmReady(userId: Long): Boolean = userId in dmReadyUserIds
@@ -25,7 +53,7 @@ class EventService(
     fun create(chatId: Long, host: Participant, eventNameRaw: String?): String {
         val eventName = eventNameRaw?.trim().orEmpty().ifBlank { defaultEventName }
 
-        return synchronized(lockFor(chatId)) {
+        val text = synchronized(lockFor(chatId)) {
             val existing = eventsByChatId[chatId]
             if (existing != null && existing.state != EventState.FINISHED) {
                 return@synchronized "Ивент уже существует: «${existing.name}» (статус: ${existing.state}).\n" +
@@ -50,10 +78,13 @@ class EventService(
                 append("Важно: кажд:ая участни:ца долж:на нажать /start в личке с ботом, иначе жеребьёвка не стартанёт.")
             }
         }
+
+        persist()
+        return text
     }
 
     fun join(chatId: Long, participant: Participant): String {
-        return synchronized(lockFor(chatId)) {
+        val text = synchronized(lockFor(chatId)) {
             val event = eventsByChatId[chatId]
                 ?: return@synchronized "Сначала создай ивент командой /create."
 
@@ -76,10 +107,13 @@ class EventService(
                 }
             }
         }
+
+        persist()
+        return text
     }
 
     fun leave(chatId: Long, userId: Long): String {
-        return synchronized(lockFor(chatId)) {
+        val text = synchronized(lockFor(chatId)) {
             val event = eventsByChatId[chatId]
                 ?: return@synchronized "Ивент не найден. /create"
 
@@ -92,6 +126,9 @@ class EventService(
 
             "➖ ${removed.display()} вышл:а. Сейчас участни:ц: ${event.participants.size}"
         }
+
+        persist()
+        return text
     }
 
     fun list(chatId: Long): String {
@@ -112,7 +149,7 @@ class EventService(
     }
 
     fun cancel(chatId: Long, requesterId: Long): String {
-        return synchronized(lockFor(chatId)) {
+        val text = synchronized(lockFor(chatId)) {
             val event = eventsByChatId[chatId]
                 ?: return@synchronized "Ивент не найден. Нечего отменять."
 
@@ -125,10 +162,13 @@ class EventService(
 
             "🛑 Ивент «${event.name}» отменён хостом.\nТеперь можно создать новый: /create"
         }
+
+        persist()
+        return text
     }
 
     fun startEvent(chatId: Long, requesterId: Long): StartEventAttempt {
-        return synchronized(lockFor(chatId)) {
+        val attempt = synchronized(lockFor(chatId)) {
             val event = eventsByChatId[chatId]
                 ?: return@synchronized StartEventAttempt.NotReady(
                     missing = emptyList(),
@@ -158,36 +198,77 @@ class EventService(
 
             startEventService.start(event, dmReadyUserIds)
         }
+
+        if (attempt is StartEventAttempt.Started) persist()
+        return attempt
     }
 
-    fun addWish(userId: Long, wishTextRaw: String): Boolean {
-        val wishText = wishTextRaw.trim()
-        if (wishText.isBlank()) return false
+    fun wishInEvent(chatId: Long, userId: Long, wishRaw: String): String {
+        val wishText = wishRaw.trim()
+        if (wishText.isBlank()) return "Напиши так: /wish хочу тетрадку или зонтик"
 
-        wishesByUserId.compute(userId) { _, existing ->
-            if (existing.isNullOrBlank()) wishText else existing + "\n" + wishText
+        val text = synchronized(lockFor(chatId)) {
+            val event = eventsByChatId[chatId] ?: return@synchronized "Ивент не найден. Сначала /create"
+            if (event.state != EventState.REGISTRATION) {
+                return@synchronized "Нельзя добавлять пожелания после старта (статус: ${event.state})."
+            }
+
+            val participant = event.participants[userId] ?: return@synchronized "Сначала зарегистрируйся: /join"
+            participant.addWish(wishText)
+
+            "✅ Пожелание добавлено. Можно писать /wish несколько раз — я всё добавлю."
         }
-        return true
+
+        persist()
+        return text
     }
 
-    fun getWish(userId: Long): String? = wishesByUserId[userId]?.trim()?.takeIf { it.isNotBlank() }
+    fun wishInPrivate(userId: Long, wishRaw: String): String {
+        val wishText = wishRaw.trim()
+        if (wishText.isBlank()) return "Напиши так: /wish хочу тетрадку или зонтик"
 
-    fun addWishInChat(chatId: Long, userId: Long, wishTextRaw: String): String {
-        return synchronized(lockFor(chatId)) {
-            val event = eventsByChatId[chatId]
-                ?: return@synchronized "Ивент не найден. Создай /create"
+        dmReadyUserIds += userId
 
-            if (!event.participants.containsKey(userId)) {
-                return@synchronized "Сначала зарегистрируйся: /join\nПотом можешь написать: /wish хочу ..."
+        val chatIds = eventsByChatId.keys.toList().filter { chatId ->
+            synchronized(lockFor(chatId)) {
+                val e = eventsByChatId[chatId]
+                e != null && e.state == EventState.REGISTRATION && e.participants.containsKey(userId)
             }
-
-            val ok = addWish(userId, wishTextRaw)
-            if (!ok) {
-                return@synchronized "Напиши так: /wish хочу тетрадку или зонтик"
-            }
-
-            val now = getWish(userId).orEmpty()
-            "✅ Пожелание добавлено!\n\nТвои пожелания сейчас:\n$now"
         }
+
+        val msg = when {
+            chatIds.isEmpty() ->
+                "Я не вижу активных ивентов, где ты участвуешь.\nСначала /join в нужной группе, потом /wish."
+
+            chatIds.size > 1 ->
+                "У тебя несколько активных ивентов в разных группах.\nЧтобы пожелания не путались, напиши /wish в нужной группе."
+
+            else -> {
+                val chatId = chatIds.single()
+                synchronized(lockFor(chatId)) {
+                    val event = eventsByChatId[chatId] ?: return@synchronized "Ивент не найден."
+                    val participant = event.participants[userId] ?: return@synchronized "Сначала /join в группе."
+                    if (event.state != EventState.REGISTRATION) {
+                        return@synchronized "Регистрация закрыта (статус: ${event.state})."
+                    }
+                    participant.addWish(wishText)
+                    "✅ Записал пожелание для ивента «${event.name}». Можно писать /wish несколько раз."
+                }
+            }
+        }
+
+        persist()
+        return msg
+    }
+
+    private fun Event.deepCopy(): Event {
+        val participantsCopy = LinkedHashMap<Long, Participant>()
+        for ((id, p) in this.participants) {
+            participantsCopy[id] = p.copy()
+        }
+        return this.copy(
+            participants = participantsCopy,
+            drawResult = this.drawResult?.copy()
+        )
     }
 }
