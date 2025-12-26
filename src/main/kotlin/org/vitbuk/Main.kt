@@ -5,7 +5,7 @@ import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.command
 import com.github.kotlintelegrambot.entities.ChatId.Companion.fromId
 import com.github.kotlintelegrambot.entities.User
-import org.vitbuk.draw.SattoloDrawAlgorithm
+import org.vitbuk.service.SattoloDrawAlgorithm
 import org.vitbuk.model.Event
 import org.vitbuk.model.EventState
 import org.vitbuk.model.Participant

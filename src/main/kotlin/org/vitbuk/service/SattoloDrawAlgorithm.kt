@@ -1,4 +1,4 @@
-package org.vitbuk.draw
+package org.vitbuk.service
 
 import org.vitbuk.model.DrawResult
 import org.vitbuk.model.Participant

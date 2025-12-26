@@ -1,6 +1,5 @@
 package org.vitbuk.service
 
-import org.vitbuk.draw.SecretSantaDrawAlgorithm
 import org.vitbuk.model.DrawResult
 import org.vitbuk.model.Event
 import org.vitbuk.model.EventState

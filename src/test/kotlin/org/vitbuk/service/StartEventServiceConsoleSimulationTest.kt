@@ -2,7 +2,6 @@ package org.vitbuk.service
 
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Test
-import org.vitbuk.draw.SattoloDrawAlgorithm
 import org.vitbuk.model.Event
 import org.vitbuk.model.EventState
 import org.vitbuk.model.Participant
