@@ -14,18 +14,12 @@ ISanta - Secrete Santa Telegram Bot for Free
 
 /start_event - if everyone is ready (registered+wrote /start in private chat) host can initiate start of the event
 
+/wish - updated wishes of participant (they will be shown to giver)
+
 Bot will randomly (satollo's algorithm) assign participants to givers and recievers (no self-givers)
 
 TODO:
 
-1.EventService instead of huge Main.kt
-
-2.CommandFactory
-
-3.Some text editing
-
-4.Persistance with some kind of DB
-
-5./wish command to set up wishlist for every Participant
-
-6.smart toilet integration
+1. sealed interface
+2. DB
+3.smart toilet integration
