@@ -26,6 +26,7 @@ fun main() {
             JoinCommand(eventService),
             LeaveCommand(eventService),
             ListCommand(eventService),
+            WishCommand(eventService),
             CancelCommand(eventService),
             StartEventCommand(eventService),
         )

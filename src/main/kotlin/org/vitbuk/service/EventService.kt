@@ -11,6 +11,7 @@ class EventService(
     private val defaultEventName: String = "Тайный Санта 🎁"
 ) {
     private val dmReadyUserIds = ConcurrentHashMap.newKeySet<Long>()
+    private val wishesByUserId = ConcurrentHashMap<Long, String>()
     private val eventsByChatId = ConcurrentHashMap<Long, Event>()
     private val locksByChatId = ConcurrentHashMap<Long, Any>()
     private fun lockFor(chatId: Long): Any = locksByChatId.computeIfAbsent(chatId) { Any() }
@@ -156,6 +157,37 @@ class EventService(
             }
 
             startEventService.start(event, dmReadyUserIds)
+        }
+    }
+
+    fun addWish(userId: Long, wishTextRaw: String): Boolean {
+        val wishText = wishTextRaw.trim()
+        if (wishText.isBlank()) return false
+
+        wishesByUserId.compute(userId) { _, existing ->
+            if (existing.isNullOrBlank()) wishText else existing + "\n" + wishText
+        }
+        return true
+    }
+
+    fun getWish(userId: Long): String? = wishesByUserId[userId]?.trim()?.takeIf { it.isNotBlank() }
+
+    fun addWishInChat(chatId: Long, userId: Long, wishTextRaw: String): String {
+        return synchronized(lockFor(chatId)) {
+            val event = eventsByChatId[chatId]
+                ?: return@synchronized "Ивент не найден. Создай /create"
+
+            if (!event.participants.containsKey(userId)) {
+                return@synchronized "Сначала зарегистрируйся: /join\nПотом можешь написать: /wish хочу ..."
+            }
+
+            val ok = addWish(userId, wishTextRaw)
+            if (!ok) {
+                return@synchronized "Напиши так: /wish хочу тетрадку или зонтик"
+            }
+
+            val now = getWish(userId).orEmpty()
+            "✅ Пожелание добавлено!\n\nТвои пожелания сейчас:\n$now"
         }
     }
 }

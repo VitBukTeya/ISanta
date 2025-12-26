@@ -36,7 +36,19 @@ class StartEventCommand(
                     val giver = snapshot.participants[giverId] ?: continue
                     val receiver = snapshot.participants[receiverId] ?: continue
 
-                    val dmText = "🎁 Жеребьёвка для «${snapshot.eventName}»\nТы даришь: ${receiver.display()}"
+                    val wish = eventService.getWish(receiverId)
+
+                    val dmText = buildString {
+                        append("🎁 Жеребьёвка для «${snapshot.eventName}»\n")
+                        append("Ты даришь: ${receiver.display()}")
+
+                        if (!wish.isNullOrBlank()) {
+                            append("\n\n📝 Пожелания получателя:")
+                            append("\n")
+                            append(wish)
+                        }
+                    }
+
                     val sendRes = ctx.bot.sendMessage(ChatId.fromId(giverId), dmText)
 
                     sendRes.fold(
