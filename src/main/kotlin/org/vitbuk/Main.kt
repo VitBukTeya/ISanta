@@ -26,6 +26,7 @@ fun main() {
     val factory = CommandFactory(
         listOf(
             HelpCommand(),
+            RepoCommand(),
             StartCommand(eventService),
             CreateCommand(eventService),
             JoinCommand(eventService),
@@ -33,7 +34,7 @@ fun main() {
             WishCommand(eventService),
             ListCommand(eventService),
             CancelCommand(eventService),
-            StartEventCommand(eventService),
+            StartEventCommand(eventService)
         )
     )
 
