@@ -12,7 +12,6 @@ class StartEventServiceConsoleSimulationTest {
 
     @Test
     fun `prints dm messages for 11 participants`() {
-        val seededRandom = SecureRandom.getInstance("SHA1PRNG").apply { setSeed(42L) }
         val algorithm = SattoloDrawAlgorithm(reseedEachDraw = true)
         val service = StartEventService(algorithm)
 
