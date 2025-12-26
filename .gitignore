@@ -72,3 +72,4 @@ replay_pid*
 *.env
 
 !gradle/wrapper/gradle-wrapper.jar
+state/
